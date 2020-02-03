@@ -1,0 +1,32 @@
+{
+  "name": "server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "engines": {
+    "node": "10.15.3"
+  },
+  "dependencies": {
+    "body-parser": "^1.18.3",
+    "cors": "^2.8.5",
+    "express": "^4.16.4",
+    "jwt-decode": "^2.2.0",
+    "lodash": "^4.17.15",
+    "mongoose": "^5.7.10",
+    "path": "^0.12.7",
+    "rand-token": "^0.4.0"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/VladVinitskiy/server.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/VladVinitskiy/server/issues"
+  },
+  "homepage": "https://github.com/VladVinitskiy/server#readme"
+}
