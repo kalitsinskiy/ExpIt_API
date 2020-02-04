@@ -14,6 +14,8 @@
     "jwt-decode": "^2.2.0",
     "lodash": "^4.17.15",
     "mongoose": "^5.7.10",
+    "nodemailer": "^6.4.2",
+    "nodemailer-smtp-transport": "^2.7.4",
     "path": "^0.12.7",
     "rand-token": "^0.4.0"
   },

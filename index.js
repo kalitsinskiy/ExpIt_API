@@ -8,8 +8,13 @@ const randtoken = require('rand-token').suid;
 const jwt = require('jsonwebtoken');
 const jwtDecode = require('jwt-decode');
 const mongoose = require('mongoose');
+const nodemailer = require("nodemailer");
+const smtpTransport = require('nodemailer-smtp-transport');
 
 const uri = "mongodb+srv://kalitsinskiy:09042000@cluster0-wdwcd.mongodb.net/test?retryWrites=true&w=majority";
+const mailer_email = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImthbGl0c2luc2tpai40NkBnbWFpbC5jb20iLCJpYXQiOjE1ODA4NDU4OTB9.1eaehXVF1HdW1POR1p8xcKcRoiwOUUjvZ4Z8wFsWUbA";
+const mailer_pass = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJwYXNzd29yZCI6IjA5MDQyMDAwIiwiaWF0IjoxNTgwODQ1OTQwfQ.DL_1CvRU_9REu8WgfpwuQvKjW40JHjL1-r_fZ7SG36M";
+
 const port = process.env.PORT || '5000';
 
 const User = require("./models/user");
@@ -17,6 +22,7 @@ const Expertise = require("./models/expertise");
 const Opinion = require("./models/opinion");
 
 let tokens=[];
+let reset_tokens=[];
 
 index.use(bodyPareser.json());
 index.use(bodyPareser.urlencoded({extended: true}));
@@ -44,7 +50,7 @@ index.route('/user')
                 if (response){
                     res.status(200).json(response)
                 }else {
-                    res.status(403)
+                    res.status(404).json("User not found")
                 }
             })
             .catch(err => res.status(401).json(err));
@@ -68,15 +74,15 @@ index.route('/user')
         User.updateOne({id: req.query.id}, {$set: req.body})
             .then(response => {
                 if (response) {
-                    User.findOne({id})
+                    User.findOne({id: req.query.id})
                         .exec()
                         .then(response => res.status(200).json(response))
-                        .catch(() => res.status(404).json("user doesn't exist"));
+                        .catch(err => res.status(500).json(err));
                 } else {
                     res.status(404).json("user doesn't exist")
                 }
             })
-            .catch(err => res.status(404).json(err));
+            .catch(err => res.status(500).json(err));
     })
     .delete((req, res) => {
         User.deleteOne({id: req.query.id})
@@ -293,6 +299,64 @@ index.get('/logout',(req, res) => {
         res.send("OK");
     }else {
         res.send("Error");
+    }
+});
+
+index.get('/forgot', (req, res) => {
+    const email = req.body.email;
+
+    User.findOne({email})  //"kalitsinskij.46@gmail.com"
+        .select('id -_id')
+        .exec()
+        .then( response => {
+            if (response){
+                const id = response.id;
+                const token = randtoken(32);
+
+                const transporter = nodemailer.createTransport(smtpTransport({
+                    service: 'gmail',
+                    host: "smtp.gmail.com",
+                    auth: {
+                        user: jwtDecode(mailer_email).email,
+                        pass: jwtDecode(mailer_pass).password
+                    }
+                }));
+
+                const mailOptions = {
+                    from: jwtDecode(mailer_email).email,
+                    // to: "kalitsinski@ukr.net",
+                    to: email,
+                    subject: "Reset password ✔",
+                    text: `For changing password follow by this link ${token}`,
+                };
+
+                transporter.sendMail(mailOptions,  (err, info) => {
+                    if(err){
+                        res.status(500).json(err);
+                    }
+                    else{
+                        reset_tokens.push({id, token});
+                        res.status(200).json(info);
+                    }
+                });
+            }else {
+                res.status(404).json("User not found")
+            }
+        })
+        .catch(err => res.status(500).json(err));
+});
+
+index.post("/reset",(req, res) => {
+    const password = jwt.sign({password: req.body.password}, 'cryptoPassword');
+    const token = req.query.token;
+    const reset = reset_tokens.find(it => it.token === token);
+
+    if (reset){
+        User.updateOne({id: reset.id}, {$set: {password}})
+            .then(() => res.status(200).json("Success"))
+            .catch(err => res.status(401).json(err));
+    }else {
+        res.status(404).json("Bad token")
     }
 });
 
