@@ -13,6 +13,8 @@ const uri = "mongodb+srv://kalitsinskiy:09042000@cluster0-wdwcd.mongodb.net/test
 const port = process.env.PORT || '5000';
 
 const User = require("./models/user");
+const Expertise = require("./models/expertise");
+const Opinion = require("./models/opinion");
 
 let tokens=[];
 
@@ -33,38 +35,203 @@ index.get('/users', (req, res) => {
         .catch(err => res.status(404).json(err));
 });
 
-index.post('/user', (req, res) => {
-    const {password, email, name, role} = req.body;
+index.route('/user')
+    .get((req, res)=>{
+        User.findOne({id: req.query.id})
+            .select('email name role id -_id')
+            .exec()
+            .then( response => {
+                if (response){
+                    res.status(200).json(response)
+                }else {
+                    res.status(403)
+                }
+            })
+            .catch(err => res.status(401).json(err));
+    })
+    .post((req, res) => {
+        const {password, email, name, role} = req.body;
 
-    const user = new User({
-        email,
-        name,
-        role,
-        // password,
-        password: jwt.sign({password}, 'cryptoPassword'),
-        id: new mongoose.Types.ObjectId()});
+        const user = new User({
+            email,
+            name,
+            role,
+            password: jwt.sign({password}, 'cryptoPassword'),
+            id: new mongoose.Types.ObjectId()
+        });
 
-    user.save()
-        .then(() => res.status(200).json({email, name, role}))
-        .catch(err => res.status(500).json(err));
-});
+        user.save()
+            .then(() => res.status(200).json({email, name, role}))
+            .catch(err => res.status(500).json(err));
+    })
+    .put((req, res) => {
+        User.updateOne({id: req.query.id}, {$set: req.body})
+            .then(response => {
+                if (response) {
+                    User.findOne({id})
+                        .exec()
+                        .then(response => res.status(200).json(response))
+                        .catch(() => res.status(404).json("user doesn't exist"));
+                } else {
+                    res.status(404).json("user doesn't exist")
+                }
+            })
+            .catch(err => res.status(404).json(err));
+    })
+    .delete((req, res) => {
+        User.deleteOne({id: req.query.id})
+            .exec()
+            .then(() => res.status(200).json("ok"))
+            .catch((err) => res.status(404).json(err));
+    });
 
-index.put('/user/:id', (req, res) => {
-    const {id} = req.params;
-    User.updateOne({id}, {$set: req.body})
-        .then(response => {
-            if(response){
-                User.findOne({id})
-                    .exec()
-                    .then( response => res.status(200).json(response))
-                    .catch(() => res.status(404).json("user doesn't exist"));
-            }else {
-                res.status(404).json("user doesn't exist")
-            }
-        })
+index.get('/expertises', (req, res) => {
+    Expertise.find()
+        .select('name keys creator_name creator_id id -_id')
+        .exec()
+        .then( response => res.status(200).json(response))
         .catch(err => res.status(404).json(err));
 });
 
+index.route('/expertise')
+    .get((req, res)=>{
+        const id = req.query.id;
+        if (id) {
+            Expertise.findOne({id})
+                .select('name keys creator_name creator_id id -_id')
+                .exec()
+                .then( response => {
+                    if (response){
+                        const {name, creator_name, creator_id, creation_date, keys} = response;
+
+                        Opinion.find({expertise_id: id})
+                            .select('user_name user_id results publishedAt expertise_id id -_id')
+                            .exec()
+                            .then( result => {
+                                if (result){
+                                    res.status(200).json({name, creator_name, creator_id, creation_date, keys, result})
+                                }else {
+                                    res.status(200).json(response)
+                                }
+                            })
+                            .catch(() => res.status(200).json(response));
+                    }else {
+                        res.status(403)
+                    }
+                })
+                .catch(err => res.status(401).json(err));
+        }else {
+            res.status(400).json("Need expertise id")
+        }
+    })
+    .post((req, res) => {
+        const {name, creator_name, creator_id, creation_date, keys} = req.body;
+
+        const expertise = new Expertise({
+            name, creator_name,
+            creator_id, creation_date, keys,
+            id: new mongoose.Types.ObjectId()
+        });
+
+        expertise.save()
+            .then(({name, creator_name, creator_id, creation_date, keys, id}) => res.status(200).json({name, creator_name, creator_id, creation_date, keys, id}))
+            .catch(err => res.status(500).json(err));
+    })
+    .put((req, res) => {
+        Expertise.updateOne({id: req.query.id}, {$set: req.body})
+            .then(response => {
+                if (response) {
+                    Expertise.findOne({id: req.query.id})
+                        .exec()
+                        .then(response => res.status(200).json(response))
+                        .catch(() => res.status(404).json("expertise doesn't exist"));
+                } else {
+                    res.status(404).json("expertise doesn't exist")
+                }
+            })
+            .catch(err => res.status(404).json(err));
+    })
+    .delete((req, res) => {
+        Expertise.deleteOne({id: req.query.id})
+            .exec()
+            .then(() => res.status(200).json("ok"))
+            .catch((err) => res.status(404).json(err));
+    });
+
+index.get('/opinions', (req, res) => {
+    if (req.query.expertise_id){
+        Opinion.find({expertise_id: req.query.expertise_id})
+            .select('user_name user_id results publishedAt expertise_id id -_id')
+            .exec()
+            .then( response => {
+                if (response){
+                    res.status(200).json(response)
+                }else {
+                    res.status(403)
+                }
+            })
+            .catch(err => res.status(401).json(err));
+    } else {
+        Opinion.find()
+            .select('user_name user_id results publishedAt expertise_id id -_id')
+            .exec()
+            .then( response => res.status(200).json(response))
+            .catch(err => res.status(404).json(err));
+    }
+});
+
+index.route('/opinion')
+    .get((req, res)=>{
+        const id = req.query.id;
+        if(id){
+            Opinion.findOne({id})
+                .select('user_name user_id results publishedAt expertise_id id -_id')
+                .exec()
+                .then( response => {
+                    if (response){
+                        res.status(200).json(response)
+                    }else {
+                        res.status(403)
+                    }
+                })
+                .catch(err => res.status(401).json(err));
+        }else {
+            res.status(400).json("Need opinion id")
+        }
+    })
+    .post((req, res) => {
+        const {user_name, user_id, results, publishedAt, expertise_id} = req.body;
+
+        const opinion = new Opinion({
+            user_name, user_id, results,
+            publishedAt, expertise_id,
+            id: new mongoose.Types.ObjectId()
+        });
+
+        opinion.save()
+            .then(({user_name, user_id, results, publishedAt, expertise_id, id}) => res.status(200).json({user_name, user_id, results, publishedAt, expertise_id, id}))
+            .catch(err => res.status(500).json(err));
+    })
+    .put((req, res) => {
+        Opinion.updateOne({id: req.query.id}, {$set: req.body})
+            .then(response => {
+                if (response) {
+                    Opinion.findOne({id: req.query.id})
+                        .exec()
+                        .then(response => res.status(200).json(response))
+                        .catch(() => res.status(404).json("opinion doesn't exist"));
+                } else {
+                    res.status(404).json("opinion doesn't exist")
+                }
+            })
+            .catch(err => res.status(404).json(err));
+    })
+    .delete((req, res) => {
+        Opinion.deleteOne({id: req.query.id})
+            .exec()
+            .then(() => res.status(200).json("ok"))
+            .catch((err) => res.status(404).json(err));
+    });
 
 index.post('/login', (req, res) => {
     const {email, password} = req.body;
