@@ -30,6 +30,8 @@ index.use(cors());
 
 mongoose.connect( uri, { useNewUrlParser: true, useUnifiedTopology: true, useCreateIndex: true });
 
+const isFractionalPart = x => x.toString().includes('.');
+
 
 index.get('/', (req, res) => res.send("Hello, it's a ExpIt api"));
 
@@ -56,18 +58,18 @@ index.route('/user')
             .catch(err => res.status(401).json(err));
     })
     .post((req, res) => {
-        const {password, email, name, role} = req.body;
+        const {password, email, name} = req.body;
 
         const user = new User({
             email,
             name,
-            role,
+            role:"",
             password: jwt.sign({password}, 'cryptoPassword'),
             id: new mongoose.Types.ObjectId()
         });
 
         user.save()
-            .then(() => res.status(200).json({email, name, role}))
+            .then(({email, name, role}) => res.status(200).json({email, name, role}))
             .catch(err => res.status(500).json(err));
     })
     .put((req, res) => {
@@ -163,6 +165,43 @@ index.route('/expertise')
             .then(() => res.status(200).json("ok"))
             .catch((err) => res.status(404).json(err));
     });
+
+index.get('/result', (req, res) => {
+    const expertise_id = req.query.expertise_id;
+
+    if (expertise_id){
+        Expertise.findOne({id: expertise_id})
+            .select('keys name -_id')
+            .exec()
+            .then( response => {
+                const {keys, name} = response;
+
+                Opinion.find({expertise_id})
+                    .select('results -_id')
+                    .exec()
+                    .then( response => response.map(it => it.results || []))
+                    .then( response => {
+                        if (response){
+                            let result={};
+
+                            keys.map((key, index) => {
+                                const val = _.sum(response.map(val => val[index]) || 0) / response.length;
+                                result[key] = isFractionalPart(val) ? +val.toFixed(3) : val;
+                            });
+
+                            res.status(200).json(result)
+                        }else {
+                            res.status(404).json(`Result for ${name} not found`)
+                        }
+                    })
+                    .catch(err => res.status(401).json(err));
+            })
+            .catch(err => res.status(401).json(err));
+    } else {
+        res.status(404).json("Need expertise_id")
+    }
+
+});
 
 index.get('/opinions', (req, res) => {
     if (req.query.expertise_id){
@@ -302,16 +341,17 @@ index.get('/logout',(req, res) => {
     }
 });
 
-index.get('/forgot', (req, res) => {
+index.post('/forgot', (req, res) => {
     const email = req.body.email;
 
-    User.findOne({email})  //"kalitsinskij.46@gmail.com"
+    User.findOne({email})
         .select('id -_id')
         .exec()
         .then( response => {
             if (response){
                 const id = response.id;
                 const token = randtoken(32);
+                reset_tokens = reset_tokens.filter(it => it.id !== id);
 
                 const transporter = nodemailer.createTransport(smtpTransport({
                     service: 'gmail',
@@ -324,10 +364,9 @@ index.get('/forgot', (req, res) => {
 
                 const mailOptions = {
                     from: jwtDecode(mailer_email).email,
-                    // to: "kalitsinski@ukr.net",
                     to: email,
                     subject: "Reset password ✔",
-                    text: `For changing password follow by this link ${token}`,
+                    text: `For changing password follow by this link ${`http://localhost:3000`}/reset?token=${token}`,
                 };
 
                 transporter.sendMail(mailOptions,  (err, info) => {
@@ -348,7 +387,7 @@ index.get('/forgot', (req, res) => {
 
 index.post("/reset",(req, res) => {
     const password = jwt.sign({password: req.body.password}, 'cryptoPassword');
-    const token = req.query.token;
+    const token =  req.body.token;
     const reset = reset_tokens.find(it => it.token === token);
 
     if (reset){
@@ -358,6 +397,7 @@ index.post("/reset",(req, res) => {
     }else {
         res.status(404).json("Bad token")
     }
+    reset_tokens = reset_tokens.filter(it => it.token !== token)
 });
 
 server.listen(port, () => console.log(`listening on port ${port}`));

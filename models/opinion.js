@@ -5,17 +5,19 @@ const OpinionSchema = new Schema({
     user_name: {
         type: String,
         required: true,
-        default: "",
-        unique : true
+        default: ""
     },
     user_id: {
         type: String,
         required: true,
-        default: "",
-        unique : true
+        default: ""
     },
     results: {
-        type: Array,
+        type: [{
+            type: Number,
+            validate: [ val => val <= 2 && val >= -2, 'Value need to be between -2 and 2'],
+            default: 0
+        }],
         required: true,
         default: []
     },
