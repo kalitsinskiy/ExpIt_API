@@ -344,45 +344,49 @@ index.get('/logout',(req, res) => {
 index.post('/forgot', (req, res) => {
     const email = req.body.email;
 
-    User.findOne({email})
-        .select('id -_id')
-        .exec()
-        .then( response => {
-            if (response){
-                const id = response.id;
-                const token = randtoken(32);
-                reset_tokens = reset_tokens.filter(it => it.id !== id);
+    if (email){
+        User.findOne({email})
+            .select('id -_id')
+            .exec()
+            .then( response => {
+                if (response){
+                    const id = response.id;
+                    const token = randtoken(32);
+                    reset_tokens = reset_tokens.filter(it => it.id !== id);
 
-                const transporter = nodemailer.createTransport(smtpTransport({
-                    service: 'gmail',
-                    host: "smtp.gmail.com",
-                    auth: {
-                        user: jwtDecode(mailer_email).email,
-                        pass: jwtDecode(mailer_pass).password
-                    }
-                }));
+                    const transporter = nodemailer.createTransport(smtpTransport({
+                        service: 'gmail',
+                        host: "smtp.gmail.com",
+                        auth: {
+                            user: jwtDecode(mailer_email).email,
+                            pass: jwtDecode(mailer_pass).password
+                        }
+                    }));
 
-                const mailOptions = {
-                    from: jwtDecode(mailer_email).email,
-                    to: email,
-                    subject: "Reset password ✔",
-                    text: `For changing password follow by this link ${`http://localhost:3000`}/reset?token=${token}`,
-                };
+                    const mailOptions = {
+                        from: jwtDecode(mailer_email).email,
+                        to: email,
+                        subject: "Reset password ✔",
+                        text: `For changing password follow by this link ${`http://localhost:3000`}/reset?token=${token}`,
+                    };
 
-                transporter.sendMail(mailOptions,  (err, info) => {
-                    if(err){
-                        res.status(500).json(err);
-                    }
-                    else{
-                        reset_tokens.push({id, token});
-                        res.status(200).json(info);
-                    }
-                });
-            }else {
-                res.status(404).json("User not found")
-            }
-        })
-        .catch(err => res.status(500).json(err));
+                    transporter.sendMail(mailOptions,  (err, info) => {
+                        if(err){
+                            res.status(500).json(err);
+                        }
+                        else{
+                            reset_tokens.push({id, token});
+                            res.status(200).json(info);
+                        }
+                    });
+                }else {
+                    res.status(404).json("User not found")
+                }
+            })
+            .catch(err => res.status(500).json(err));
+    }else {
+        res.status(404).json("Need to providing email")
+    }
 });
 
 index.post("/reset",(req, res) => {
@@ -390,14 +394,18 @@ index.post("/reset",(req, res) => {
     const token =  req.body.token;
     const reset = reset_tokens.find(it => it.token === token);
 
-    if (reset){
-        User.updateOne({id: reset.id}, {$set: {password}})
-            .then(() => res.status(200).json("Success"))
-            .catch(err => res.status(401).json(err));
+    if (req.body.password){
+        if (reset){
+            User.updateOne({id: reset.id}, {$set: {password}})
+                .then(() => res.status(200).json("Success"))
+                .catch(err => res.status(401).json(err));
+        }else {
+            res.status(404).json("Bad token")
+        }
+        reset_tokens = reset_tokens.filter(it => it.token !== token)
     }else {
-        res.status(404).json("Bad token")
+        res.status(404).json("Need to providing new password")
     }
-    reset_tokens = reset_tokens.filter(it => it.token !== token)
 });
 
 server.listen(port, () => console.log(`listening on port ${port}`));
