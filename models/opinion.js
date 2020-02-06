@@ -22,7 +22,8 @@ const OpinionSchema = new Schema({
         default: []
     },
     publishedAt: {
-        type: Date
+        type: Date,
+        required: true
     },
     expertise_id: {
         type: String,

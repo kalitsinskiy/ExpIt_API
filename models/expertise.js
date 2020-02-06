@@ -17,7 +17,8 @@ const expertiseSchema = new Schema({
         required: true
     },
     creation_date: {
-        type: Date
+        type: Date,
+        required: true
     },
     keys: {
         type: Array,
