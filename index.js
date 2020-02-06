@@ -3,17 +3,18 @@ const index = express();
 const server = require('http').createServer(index);
 const bodyPareser = require('body-parser');
 const cors = require('cors');
-const _ = require("lodash");
+const {sum} = require("lodash");
 const randtoken = require('rand-token').suid;
 const jwt = require('jsonwebtoken');
 const jwtDecode = require('jwt-decode');
 const mongoose = require('mongoose');
 const nodemailer = require("nodemailer");
 const smtpTransport = require('nodemailer-smtp-transport');
+const cookieParser = require('cookie-parser');
 
-const uri = "mongodb+srv://kalitsinskiy:09042000@cluster0-wdwcd.mongodb.net/test?retryWrites=true&w=majority";
+const secret = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJwYXNzd29yZCI6IjA5MDQyMDAwIiwiaWF0IjoxNTgwODQ1OTQwfQ.DL_1CvRU_9REu8WgfpwuQvKjW40JHjL1-r_fZ7SG36M";
 const mailer_email = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImthbGl0c2luc2tpai40NkBnbWFpbC5jb20iLCJpYXQiOjE1ODA4NDU4OTB9.1eaehXVF1HdW1POR1p8xcKcRoiwOUUjvZ4Z8wFsWUbA";
-const mailer_pass = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJwYXNzd29yZCI6IjA5MDQyMDAwIiwiaWF0IjoxNTgwODQ1OTQwfQ.DL_1CvRU_9REu8WgfpwuQvKjW40JHjL1-r_fZ7SG36M";
+const uri = `mongodb+srv://kalitsinskiy:${jwtDecode(secret).password}@cluster0-wdwcd.mongodb.net/test?retryWrites=true&w=majority`;
 
 const port = process.env.PORT || '5000';
 
@@ -21,16 +22,15 @@ const User = require("./models/user");
 const Expertise = require("./models/expertise");
 const Opinion = require("./models/opinion");
 
-let tokens=[];
+let sessions=[];
 let reset_tokens=[];
 
 index.use(bodyPareser.json());
 index.use(bodyPareser.urlencoded({extended: true}));
 index.use(cors());
+index.use(cookieParser(jwtDecode(secret).password));
 
 mongoose.connect( uri, { useNewUrlParser: true, useUnifiedTopology: true, useCreateIndex: true });
-
-const isFractionalPart = x => x.toString().includes('.');
 
 
 index.get('/', (req, res) => res.send("Hello, it's a ExpIt api"));
@@ -63,7 +63,6 @@ index.route('/user')
         const user = new User({
             email,
             name,
-            role:"",
             password: jwt.sign({password}, 'cryptoPassword'),
             id: new mongoose.Types.ObjectId()
         });
@@ -190,8 +189,8 @@ index.get('/result', (req, res) => {
                             let result={};
 
                             keys.map((key, index) => {
-                                const val = _.sum(response.map(val => val[index]) || 0) / response.length;
-                                result[key] = isFractionalPart(val) ? +val.toFixed(3) : val;
+                                const val = sum(response.map(val => val[index]) || 0) / response.length;
+                                result[key] = val.toString().includes('.') ? +val.toFixed(3) : val;
                             });
 
                             res.status(200).json(result)
@@ -307,38 +306,42 @@ index.route('/opinion')
     });
 
 index.post('/login', (req, res) => {
-    const {email, password} = req.body;
-    const innerPass = jwtDecode(password).password;
-
-    User.findOne({email})
+    User.findOne({email: req.body.email})
+        .select('name email role id password -_id')
         .exec()
         .then( response => {
-            if(response && jwtDecode(response.password).password === innerPass){
-                const { id, name, surname, email, birthday, phone, role} = response;
-                const token = randtoken(16);
+            if(response){
+                if(response.password === req.body.password){
+                    const { name, email, role, id } = response;
+                    const token = randtoken(16);
 
-                tokens.push({"token": token, id});
-                tokens = _.uniqBy(tokens, 'id');
+                    sessions = sessions.filter(ses => ses.token !== req.signedCookies.token);
+                    sessions.push({token, id});
 
-                res.status(200).json({response: {id,  name, surname, email, birthday, phone, role}, token});
+                    res.status(200)
+                       .cookie('token', token, { maxAge: 900000, httpOnly: true, signed:true})
+                       .json({name, email, role, id});
+                }else {
+                    res.status(401).json("Incorrect password");
+                }
             }else {
-                res.status(401).json("Incorrect password");
+                res.status(404).json("user doesn't exist with this email");
             }
         })
         .catch(err => res.status(500).json(err));
 });
 
 index.get('/session',(req, res) => {
-    const {token} = req.query;
+    const token = req.signedCookies.token;
 
-    if (tokens.length === 0 && token){
+    if (sessions.length === 0 && token){
         res.json({
             error: true,
             status:"Failed",
             message:"Session not founds"
         })
     } else {
-        const session = tokens.find(item => item.token === token);
+        const session = sessions.find(item => item.token === token);
 
         if(session && session.id){
             User.findOne({id: session.id})
@@ -357,15 +360,8 @@ index.get('/session',(req, res) => {
 });
 
 index.get('/logout',(req, res) => {
-    const {token} = req.query;
-    const found_token = tokens.find(item => item.token === token);
-
-    if (token && found_token && found_token.token === token) {
-        tokens = tokens.filter((item) => token !== item.token);
-        res.status(200).json("OK")
-    }else {
-        res.status(498).json("Bad token")
-    }
+    sessions = sessions.filter((item) => req.signedCookies.token !== item.token);
+    res.status(200).clearCookie("token").json("OK")
 });
 
 index.post('/forgot', (req, res) => {
@@ -375,8 +371,9 @@ index.post('/forgot', (req, res) => {
         User.findOne({email})
             .select('id -_id')
             .exec()
-            .then( ({id}) => {
+            .then( response => {
                 if (response){
+                    const id = response.id;
                     const token = randtoken(32);
                     reset_tokens = reset_tokens.filter(it => it.id !== id);
 
@@ -385,7 +382,7 @@ index.post('/forgot', (req, res) => {
                         host: "smtp.gmail.com",
                         auth: {
                             user: jwtDecode(mailer_email).email,
-                            pass: jwtDecode(mailer_pass).password
+                            pass: jwtDecode(secret).password
                         }
                     }));
 
