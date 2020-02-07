@@ -294,15 +294,63 @@ index.route('/opinion')
     })
     .delete((req, res) => {
         const id = req.query.id;
+        const token = req.signedCookies.token;
+        const session_user = sessions.find(ses => ses.token === token);
 
         if (id){
-            Opinion.deleteOne({id})
-                .exec()
-                .then(() => res.status(200).json("ok"))
-                .catch(err => res.status(500).json(err));
+            if (session_user){
+                User.findOne({id: session_user.id})
+                    .select('id role -_id')
+                    .exec()
+                    .then( response => {
+                        if (response) {
+                            const user_id = response.id;
+                            const user_role = response.role;
+
+                            if (user_role === "admin") {
+                                Opinion.deleteOne({id})
+                                    .exec()
+                                    .then(() => res.status(200).json("ok"))
+                                    .catch(err => res.status(500).json(err));
+                            } else {
+                                Opinion.findOne({id})
+                                    .exec()
+                                    .then(opinion => {
+                                        if (opinion){
+                                            if (opinion.user_id === user_id){
+                                                Opinion.deleteOne({id})
+                                                    .exec()
+                                                    .then(() => res.status(200).json("ok"))
+                                                    .catch(err => res.status(500).json(err));
+                                            } else {
+                                                res.status(403).json("You don't have permission")
+                                            }
+                                        } else {
+                                            res.status(403).json("Opinion doesn't exist")
+                                        }
+                                    })
+                                    .catch(err => res.status(500).json(err));
+                            }
+                        }else {
+                            res.status(404).json("User doesn't exist")
+                        }
+                    })
+                    .catch(err => res.status(500).json(err));
+            } else {
+                res.status(498).json("Incorrect token, try relogin")
+            }
         }else {
             res.status(400).json("Need opinion id")
         }
+
+        // if (id){
+        //     Opinion.deleteOne({id})
+        //         .exec()
+        //         .then(() => res.status(200).json("ok"))
+        //         .catch(err => res.status(500).json(err));
+        // }else {
+        //     res.status(400).json("Need opinion id")
+        // }
     });
 
 index.post('/login', (req, res) => {
@@ -314,12 +362,18 @@ index.post('/login', (req, res) => {
                 if(response.password === req.body.password){
                     const { name, email, role, id } = response;
                     const token = randtoken(16);
+                    const now = new Date();
+                    const tokenSettings = {
+                        expires: new Date(now.setMonth(now.getMonth() === 11 ? 1 : now.getMonth() + 1)),  // 1 month
+                        httpOnly: true,
+                        signed: true
+                    };
 
                     sessions = sessions.filter(ses => ses.token !== req.signedCookies.token);
                     sessions.push({token, id});
 
                     res.status(200)
-                       .cookie('token', token, { maxAge: 900000, httpOnly: true, signed:true})
+                       .cookie('token', token, tokenSettings)
                        .json({name, email, role, id});
                 }else {
                     res.status(401).json("Incorrect password");
