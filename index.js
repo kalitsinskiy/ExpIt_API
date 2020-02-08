@@ -3,7 +3,7 @@ const index = express();
 const server = require('http').createServer(index);
 const bodyPareser = require('body-parser');
 const cors = require('cors');
-const {sum} = require("lodash");
+const {sum, isEmpty} = require("lodash");
 const randtoken = require('rand-token').suid;
 const jwt = require('jsonwebtoken');
 const jwtDecode = require('jwt-decode');
@@ -32,10 +32,56 @@ index.use(cookieParser(jwtDecode(secret).password));
 
 mongoose.connect( uri, { useNewUrlParser: true, useUnifiedTopology: true, useCreateIndex: true });
 
+const isAuth = () => {
+    return [
+        (req, res, next) => {
+            if (isEmpty(sessions)) {
+                return res.status(401).json({
+                    error: true,
+                    status: "Failed",
+                    message: "Session not founds"
+                });
+            } else {
+                const session_user = sessions.find(ses => ses.token === req.signedCookies.token);
+
+                if (session_user) {
+                    next();
+                } else {
+                    return res.status(401).json({
+                        error: true,
+                        status: "Failed",
+                        message: "Session not founds"
+                    });
+                }
+            }
+        }
+    ];
+};
+
+const isAdmin = () => {
+    return [
+        (req, res, next) => {
+            const session_user = sessions.find(ses => ses.token === req.signedCookies.token);
+
+            if (session_user.isAdmin) {
+                next();
+            } else {
+                return res.status(403).json({message: "You haven't permission"});
+            }
+        }
+    ];
+};
+
+const isId = () => {
+    return [
+        (req, res, next) => req.query.id ? next() : res.status(400).json({message: "Need target id"})
+    ];
+};
+
 
 index.get('/', (req, res) => res.send("Hello, it's a ExpIt api"));
 
-index.get('/users', (req, res) => {
+index.get('/users', isAuth(), isAdmin(), (req, res) => {
     User.find()
         .select('name email role id -_id')
         .exec()
@@ -44,7 +90,7 @@ index.get('/users', (req, res) => {
 });
 
 index.route('/user')
-    .get((req, res)=>{
+    .get(isId(), (req, res)=>{
         User.findOne({id: req.query.id})
             .select('email name role id -_id')
             .exec()
@@ -52,7 +98,7 @@ index.route('/user')
                 if (response){
                     res.status(200).json(response)
                 }else {
-                    res.status(404).json("User not found")
+                    res.status(404).json({message: "User not found"})
                 }
             })
             .catch(err => res.status(500).json(err));
@@ -60,32 +106,42 @@ index.route('/user')
     .post((req, res) => {
         const {password, email, name} = req.body;
 
-        const user = new User({
-            email,
-            name,
-            password: jwt.sign({password}, 'cryptoPassword'),
-            id: new mongoose.Types.ObjectId()
-        });
+        if (password){
+            const user = new User({
+                email,
+                name,
+                password: jwt.sign({password}, 'cryptoPassword'),
+                id: new mongoose.Types.ObjectId()
+            });
 
-        user.save()
-            .then(({email, name, role}) => res.status(200).json({email, name, role}))
-            .catch(err => res.status(400).json(err));
+            user.save()
+                .then(({email, name, role, id}) => res.status(200).json({email, name, role, id}))
+                .catch(err => res.status(400).json(err));
+        }else {
+            res.status(400).json({message: "Password is absent"})
+        }
     })
-    .put((req, res) => {
-        User.updateOne({id: req.query.id}, {$set: req.body})
-            .then(response => {
-                if (response) {
-                    User.findOne({id: req.query.id})
-                        .exec()
-                        .then(response => res.status(200).json(response))
-                        .catch(err => res.status(400).json(err));
-                } else {
-                    res.status(404).json("user doesn't exist")
-                }
-            })
-            .catch(err => res.status(400).json(err));
+    .put(isAuth(), isId(), (req, res) => {
+        const session_user = sessions.find(ses => ses.token === req.signedCookies.token);
+
+        if (req.query.id === session_user.id) {
+            User.updateOne({id: req.query.id}, {$set: req.body})
+                .then(response => {
+                    if (response) {
+                        User.findOne({id: req.query.id})
+                            .exec()
+                            .then(response => res.status(200).json(response))
+                            .catch(err => res.status(400).json(err));
+                    } else {
+                        res.status(404).json({message: "User doesn't exist"})
+                    }
+                })
+                .catch(err => res.status(400).json(err));
+        } else {
+            res.status(403).json({message: "You haven't permission"})
+        }
     })
-    .delete((req, res) => {
+    .delete(isAuth(), isId(), isAdmin(), (req, res) => {
         User.deleteOne({id: req.query.id})
             .exec()
             .then(() => res.status(200).json("ok"))
@@ -101,35 +157,29 @@ index.get('/expertises', (req, res) => {
 });
 
 index.route('/expertise')
-    .get((req, res)=>{
+    .get(isId(), (req, res) => {
         const {id, opinions} = req.query;
-        if (id) {
-            Expertise.findOne({id})
-                .select('name keys creator_name creator_id creation_date id -_id')
-                .exec()
-                .then( response => {
-                    if (response){
-                        if (opinions){
-                            Opinion.find({expertise_id: id})
-                                .select('user_name user_id results publishedAt expertise_id id -_id')
-                                .exec()
-                                .then(opinions => {
-                                    res.status(200).json({response, opinions: opinions || []})
-                                })
-                                .catch(() => res.status(200).json(response));
-                        } else {
-                            res.status(200).json(response)
-                        }
-                    }else {
-                        res.status(404).json("Expertise not found")
+        Expertise.findOne({id})
+            .select('name keys creator_name creator_id creation_date id -_id')
+            .exec()
+            .then(response => {
+                if (response) {
+                    if (opinions) {
+                        Opinion.find({expertise_id: id})
+                            .select('user_name user_id results publishedAt expertise_id id -_id')
+                            .exec()
+                            .then(opinions => res.status(200).json({response, opinions: opinions || []}))
+                            .catch(() => res.status(200).json(response));
+                    } else {
+                        res.status(200).json(response)
                     }
-                })
-                .catch(err => res.status(500).json(err));
-        }else {
-            res.status(400).json("Need expertise id")
-        }
+                } else {
+                    res.status(404).json("Expertise not found")
+                }
+            })
+            .catch(err => res.status(500).json(err));
     })
-    .post((req, res) => {
+    .post(isAuth(), (req, res) => {
         const expertise = new Expertise({
             ...req.body,
             id: new mongoose.Types.ObjectId()
@@ -139,35 +189,25 @@ index.route('/expertise')
             .then(({name, creator_name, creator_id, creation_date, keys, id}) => res.status(200).json({name, creator_name, creator_id, creation_date, keys, id}))
             .catch(err => res.status(500).json(err));
     })
-    .put((req, res) => {
-        const id = req.query.id;
-        if (id){
-            Expertise.updateOne({id}, {$set: req.body})
-                .then(response => {
-                    if (response) {
-                        Expertise.findOne({id: req.query.id})
-                            .exec()
-                            .then(response => res.status(200).json(response))
-                            .catch(err => res.status(500).json(err));
-                    } else {
-                        res.status(404).json("expertise doesn't exist")
-                    }
-                })
-                .catch(err => res.status(500).json(err));
-        }else {
-            res.status(400).json("Need expertise id")
-        }
+    .put(isAuth(), isId(), (req, res) => {
+        Expertise.updateOne({id: req.query.id}, {$set: req.body})
+            .then(response => {
+                if (response) {
+                    Expertise.findOne({id: req.query.id})
+                        .exec()
+                        .then(response => res.status(200).json(response))
+                        .catch(err => res.status(500).json(err));
+                } else {
+                    res.status(404).json({message: "Expertise doesn't exist"})
+                }
+            })
+            .catch(err => res.status(500).json(err));
     })
-    .delete((req, res) => {
-        const id = req.query.id;
-        if(id){
-            Expertise.deleteOne({id})
-                .exec()
-                .then(() => res.status(200).json("ok"))
-                .catch((err) => res.status(404).json(err));
-        }else {
-            res.status(400).json("Need expertise id")
-        }
+    .delete(isAuth(), isId(), (req, res) => {
+        Expertise.deleteOne({id: req.query.id})
+            .exec()
+            .then(() => res.status(200).json("ok"))
+            .catch((err) => res.status(404).json(err));
     });
 
 index.get('/result', (req, res) => {
@@ -195,14 +235,14 @@ index.get('/result', (req, res) => {
 
                             res.status(200).json(result)
                         }else {
-                            res.status(404).json(`Result for ${name} not found`)
+                            res.status(404).json({message: `Result for ${name} not found`})
                         }
                     })
                     .catch(err => res.status(500).json(err));
             })
             .catch(err => res.status(500).json(err));
     } else {
-        res.status(400).json("Need expertise_id")
+        res.status(400).json({message: "Need expertise_id"})
     }
 
 });
@@ -299,58 +339,36 @@ index.route('/opinion')
 
         if (id){
             if (session_user){
-                User.findOne({id: session_user.id})
-                    .select('id role -_id')
-                    .exec()
-                    .then( response => {
-                        if (response) {
-                            const user_id = response.id;
-                            const user_role = response.role;
-
-                            if (user_role === "admin") {
-                                Opinion.deleteOne({id})
-                                    .exec()
-                                    .then(() => res.status(200).json("ok"))
-                                    .catch(err => res.status(500).json(err));
+                if (session_user.isAdmin) {
+                    Opinion.deleteOne({id})
+                        .exec()
+                        .then(() => res.status(200).json("ok"))
+                        .catch(err => res.status(500).json(err));
+                } else {
+                    Opinion.findOne({id})
+                        .exec()
+                        .then(opinion => {
+                            if (opinion){
+                                if (opinion.user_id === session_user.id){
+                                    Opinion.deleteOne({id})
+                                        .exec()
+                                        .then(() => res.status(200).json("ok"))
+                                        .catch(err => res.status(500).json(err));
+                                } else {
+                                    res.status(403).json("You don't have permission")
+                                }
                             } else {
-                                Opinion.findOne({id})
-                                    .exec()
-                                    .then(opinion => {
-                                        if (opinion){
-                                            if (opinion.user_id === user_id){
-                                                Opinion.deleteOne({id})
-                                                    .exec()
-                                                    .then(() => res.status(200).json("ok"))
-                                                    .catch(err => res.status(500).json(err));
-                                            } else {
-                                                res.status(403).json("You don't have permission")
-                                            }
-                                        } else {
-                                            res.status(403).json("Opinion doesn't exist")
-                                        }
-                                    })
-                                    .catch(err => res.status(500).json(err));
+                                res.status(403).json("Opinion doesn't exist")
                             }
-                        }else {
-                            res.status(404).json("User doesn't exist")
-                        }
-                    })
-                    .catch(err => res.status(500).json(err));
+                        })
+                        .catch(err => res.status(500).json(err));
+                }
             } else {
                 res.status(498).json("Incorrect token, try relogin")
             }
         }else {
             res.status(400).json("Need opinion id")
         }
-
-        // if (id){
-        //     Opinion.deleteOne({id})
-        //         .exec()
-        //         .then(() => res.status(200).json("ok"))
-        //         .catch(err => res.status(500).json(err));
-        // }else {
-        //     res.status(400).json("Need opinion id")
-        // }
     });
 
 index.post('/login', (req, res) => {
@@ -370,47 +388,33 @@ index.post('/login', (req, res) => {
                     };
 
                     sessions = sessions.filter(ses => ses.token !== req.signedCookies.token);
-                    sessions.push({token, id});
+                    sessions.push({
+                        token,
+                        id: id.toString(),
+                        isAdmin: role === "admin"
+                    });
 
                     res.status(200)
                        .cookie('token', token, tokenSettings)
                        .json({name, email, role, id});
                 }else {
-                    res.status(401).json("Incorrect password");
+                    res.status(401).json({message: "Incorrect password"});
                 }
             }else {
-                res.status(404).json("user doesn't exist with this email");
+                res.status(404).json({message: "User doesn't exist with this email"});
             }
         })
         .catch(err => res.status(500).json(err));
 });
 
-index.get('/session',(req, res) => {
-    const token = req.signedCookies.token;
+index.get('/session', isAuth(), (req, res) => {
+    const session = sessions.find(item => item.token === req.signedCookies.token);
 
-    if (sessions.length === 0 && token){
-        res.json({
-            error: true,
-            status:"Failed",
-            message:"Session not founds"
-        })
-    } else {
-        const session = sessions.find(item => item.token === token);
-
-        if(session && session.id){
-            User.findOne({id: session.id})
-                .select('name email role id -_id')
-                .exec()
-                .then( response => res.status(200).json(response))
-                .catch(err => res.status(500).json(err));
-        }else {
-            res.status(404).json({
-                error: true,
-                status:"Failed",
-                message:"Session not founds"
-            })
-        }
-    }
+    User.findOne({id: session.id})
+        .select('name email role id -_id')
+        .exec()
+        .then(response => res.status(200).json(response))
+        .catch(err => res.status(500).json(err));
 });
 
 index.get('/logout',(req, res) => {
@@ -457,12 +461,12 @@ index.post('/forgot', (req, res) => {
                         }
                     });
                 }else {
-                    res.status(404).json("User not found")
+                    res.status(404).json({message: "User not found"})
                 }
             })
             .catch(err => res.status(500).json(err));
     }else {
-        res.status(404).json("Need to providing email")
+        res.status(404).json({message: "Need to providing email"})
     }
 });
 
@@ -477,11 +481,11 @@ index.post("/reset",(req, res) => {
                 .then(() => res.status(200).json("Success"))
                 .catch(err => res.status(401).json(err));
         }else {
-            res.status(498).json("Bad token")
+            res.status(498).json({message: "Bad token"})
         }
         reset_tokens = reset_tokens.filter(it => it.token !== token)
     }else {
-        res.status(404).json("Need to providing new password")
+        res.status(404).json({message: "Need to providing new password"})
     }
 });
 
