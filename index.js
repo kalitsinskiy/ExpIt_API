@@ -3,7 +3,7 @@ const index = express();
 const server = require('http').createServer(index);
 const bodyPareser = require('body-parser');
 const cors = require('cors');
-const {sum, isEmpty} = require("lodash");
+const {sum, isEmpty, cloneDeep} = require("lodash");
 const randtoken = require('rand-token').suid;
 const jwt = require('jsonwebtoken');
 const jwtDecode = require('jwt-decode');
@@ -58,6 +58,7 @@ const isAuth = (checkAdmin = false) => {
         }
     ];
 };
+
 const isQueryKey = (target = "target", key = "id") => {
     return [
         (req, res, next) => req.query[key] ? next() : res.status(400).json({message: `Need ${target}'s ${key}`})
@@ -155,17 +156,35 @@ index.get('/expertises', (req, res) => {
 
 index.route('/expertise')
     .get(isQueryKey("Expertise"), (req, res) => {
-        const {id, opinions} = req.query;
+        const {id, opinions, result} = req.query;
+
         Expertise.findOne({id})
             .select('name keys creator_name creator_id creation_date id -_id')
             .exec()
             .then(response => {
                 if (response) {
-                    if (opinions) {
+                    if (opinions || result) {
                         Opinion.find({expertise_id: id})
                             .select('user_name user_id results publishedAt expertise_id id -_id')
                             .exec()
-                            .then(opinions => res.status(200).json({response, opinions: opinions || []}))
+                            .then(resOpinions =>{
+                                const {name, keys, creator,_name, creator_id, creation_date, id} = response;
+                                const answer = cloneDeep({name, keys, creator,_name, creator_id, creation_date, id});
+                                if (opinions){
+                                    answer.opinions = resOpinions || []
+                                }
+                                if(result){
+                                    let count={};
+
+                                    answer.keys.map((key, index) => {
+                                        const val = sum(resOpinions.map(val => val.results[index]) || 0) / resOpinions.length;
+                                        count[key] = val.toString().includes('.') ? +val.toFixed(3) : val;
+                                    });
+                                    answer.result = count;
+                                }
+
+                                res.status(200).json(answer)
+                            })
                             .catch(() => res.status(200).json(response));
                     } else {
                         res.status(200).json(response)
