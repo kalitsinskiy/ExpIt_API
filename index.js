@@ -81,7 +81,7 @@ const isId = () => {
 
 index.get('/', (req, res) => res.send("Hello, it's a ExpIt api"));
 
-index.get('/users', isAuth(), isAdmin(), (req, res) => {
+index.get('/users', /*isAuth(), isAdmin(),*/ (req, res) => {
     User.find()
         .select('name email role id -_id')
         .exec()
