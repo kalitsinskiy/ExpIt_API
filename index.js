@@ -39,7 +39,7 @@ const isAuth = () => {
                 return res.status(401).json({
                     error: true,
                     status: "Failed",
-                    message: "Session not founds"
+                    message: "Session not found"
                 });
             } else {
                 const session_user = sessions.find(ses => ses.token === req.signedCookies.token);
@@ -50,7 +50,7 @@ const isAuth = () => {
                     return res.status(401).json({
                         error: true,
                         status: "Failed",
-                        message: "Session not founds"
+                        message: "Session not found"
                     });
                 }
             }
