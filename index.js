@@ -270,17 +270,13 @@ index.get('/opinions', (req, res) => {
 });
 
 index.route('/opinion')
-    .get((req, res)=>{
-        const id = req.query.id;
-        if(id){
-            Opinion.findOne({id})
-                .select('user_name user_id results publishedAt expertise_id id -_id')
-                .exec()
-                .then( response => res.status(200).json(response))
-                .catch(err => res.status(500).json(err));
-        }else {
-            res.status(400).json("Need opinion id")
-        }
+    .get(isId(), (req, res) => {
+        Opinion.findOne({id: req.query.id})
+            .select('user_name user_id results publishedAt expertise_id id -_id')
+            .exec()
+            .then(response => res.status(200).json(response))
+            .catch(err => res.status(500).json(err));
+
     })
     .post((req, res) => {
         const {user_name, user_id, results, publishedAt, expertise_id} = req.body;
@@ -292,7 +288,7 @@ index.route('/opinion')
                 const keys = response.keys;
                 if (response && keys.length > 0){
                     if (keys.length !== results.length) {
-                        res.status(400).json(`Results array must contain ${keys.length} values`)
+                        res.status(400).json({message: `Results array must contain ${keys.length} values`})
                     } else {
                         const opinion = new Opinion({
                             user_name, user_id, results,
@@ -307,7 +303,7 @@ index.route('/opinion')
                             .catch(err => res.status(500).json(err));
                     }
                 }else {
-                    res.status(400).json("This expertise doesn't contain any keys")
+                    res.status(400).json({message: "This expertise doesn't contain any keys"})
                 }
             })
             .catch(err => res.status(500).json(err));
@@ -324,7 +320,7 @@ index.route('/opinion')
                             .then(response => res.status(200).json(response))
                             .catch(() => res.status(404).json("opinion doesn't exist"));
                     } else {
-                        res.status(404).json("opinion doesn't exist")
+                        res.status(404).json({message: "Opinion doesn't exist"})
                     }
                 })
                 .catch(err => res.status(500).json(err));
@@ -332,42 +328,33 @@ index.route('/opinion')
             res.status(400).json("Need opinion id")
         }
     })
-    .delete((req, res) => {
+    .delete(isAuth(), isId(), (req, res) => {
         const id = req.query.id;
-        const token = req.signedCookies.token;
-        const session_user = sessions.find(ses => ses.token === token);
+        const session_user = sessions.find(ses => ses.token === req.signedCookies.token);
 
-        if (id){
-            if (session_user){
-                if (session_user.isAdmin) {
-                    Opinion.deleteOne({id})
-                        .exec()
-                        .then(() => res.status(200).json("ok"))
-                        .catch(err => res.status(500).json(err));
-                } else {
-                    Opinion.findOne({id})
-                        .exec()
-                        .then(opinion => {
-                            if (opinion){
-                                if (opinion.user_id === session_user.id){
-                                    Opinion.deleteOne({id})
-                                        .exec()
-                                        .then(() => res.status(200).json("ok"))
-                                        .catch(err => res.status(500).json(err));
-                                } else {
-                                    res.status(403).json("You don't have permission")
-                                }
-                            } else {
-                                res.status(403).json("Opinion doesn't exist")
-                            }
-                        })
-                        .catch(err => res.status(500).json(err));
-                }
-            } else {
-                res.status(498).json("Incorrect token, try relogin")
-            }
-        }else {
-            res.status(400).json("Need opinion id")
+        if (session_user.isAdmin) {
+            Opinion.deleteOne({id})
+                .exec()
+                .then(() => res.status(200).json("ok"))
+                .catch(err => res.status(500).json(err));
+        } else {
+            Opinion.findOne({id})
+                .exec()
+                .then(opinion => {
+                    if (opinion) {
+                        if (opinion.user_id === session_user.id) {
+                            Opinion.deleteOne({id})
+                                .exec()
+                                .then(() => res.status(200).json("ok"))
+                                .catch(err => res.status(500).json(err));
+                        } else {
+                            res.status(403).json({message: "You don't have permission"})
+                        }
+                    } else {
+                        res.status(403).json({message: "Opinion doesn't exist"})
+                    }
+                })
+                .catch(err => res.status(500).json(err));
         }
     });
 
