@@ -11,6 +11,7 @@ const mongoose = require('mongoose');
 const nodemailer = require("nodemailer");
 const smtpTransport = require('nodemailer-smtp-transport');
 const cookieParser = require('cookie-parser');
+const moment = require('moment');
 
 const secret = jwtDecode("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJwYXNzd29yZCI6IjA5MDQyMDAwIiwiaWF0IjoxNTgwODQ1OTQwfQ.DL_1CvRU_9REu8WgfpwuQvKjW40JHjL1-r_fZ7SG36M").password;
 const mailer_email = jwtDecode("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImthbGl0c2luc2tpai40NkBnbWFpbC5jb20iLCJpYXQiOjE1ODA4NDU4OTB9.1eaehXVF1HdW1POR1p8xcKcRoiwOUUjvZ4Z8wFsWUbA").email;
@@ -63,6 +64,17 @@ const isQueryKey = (target = "target", key = "id") => {
     return [
         (req, res, next) => req.query[key] ? next() : res.status(400).json({message: `Need ${target}'s ${key}`})
     ];
+};
+
+const countResult = (keys, opinions)=>{
+    let result={};
+
+    keys.map((key, index) => {
+        const val = sum(opinions.map(val => val[index]) || 0) / opinions.length;
+        result[key] = val.toString().includes('.') ? +val.toFixed(3) : val;
+    });
+
+    return result
 };
 
 
@@ -147,11 +159,32 @@ index.route('/user')
     });
 
 index.get('/expertises', (req, res) => {
-    Expertise.find()
-        .select('name keys creator_name creator_id id -_id')
-        .exec()
-        .then( response => res.status(200).json(response))
-        .catch(err => res.status(400).json(err));
+    const {start_ts, end_ts} = req.query;
+
+    if (start_ts && end_ts){
+        const start = moment(start_ts, 'YYYYMMDDHHmm');
+        const end = moment(end_ts, 'YYYYMMDDHHmm');
+
+        if (start.isValid() && end.isValid() && start_ts.length === 12 && end_ts.length === 12){
+            Expertise
+                .find({ creation_date: {
+                        $gte: start.toDate(),
+                        $lte: end.toDate()
+                    } })
+                .select('name keys creator_name creator_id creation_date id -_id')
+                .exec()
+                .then( response => res.status(200).json(response))
+                .catch(err => res.status(400).json(err));
+        }else {
+            res.status(400).json({message: "Invalid date, correct format YYYYMMDDHHmm"})
+        }
+    }else {
+        Expertise.find()
+            .select('name keys creator_name creator_id creation_date id -_id')
+            .exec()
+            .then( response => res.status(200).json(response))
+            .catch(err => res.status(400).json(err));
+    }
 });
 
 index.route('/expertise')
@@ -174,13 +207,7 @@ index.route('/expertise')
                                     answer.opinions = resOpinions || []
                                 }
                                 if(result){
-                                    let count={};
-
-                                    answer.keys.map((key, index) => {
-                                        const val = sum(resOpinions.map(val => val.results[index]) || 0) / resOpinions.length;
-                                        count[key] = val.toString().includes('.') ? +val.toFixed(3) : val;
-                                    });
-                                    answer.result = count;
+                                    answer.result = countResult(answer.keys, resOpinions.map(it => it.results || []));
                                 }
 
                                 res.status(200).json(answer)
@@ -237,17 +264,9 @@ index.get('/result', isQueryKey("Results","expertise_id"), (req, res) => {
                 Opinion.find({expertise_id: req.query.expertise_id})
                     .select('results -_id')
                     .exec()
-                    .then( response => response.map(it => it.results || []))
                     .then( response => {
                         if (response){
-                            let result={};
-
-                            keys.map((key, index) => {
-                                const val = sum(response.map(val => val[index]) || 0) / response.length;
-                                result[key] = val.toString().includes('.') ? +val.toFixed(3) : val;
-                            });
-
-                            res.status(200).json(result)
+                            res.status(200).json(countResult(keys, response.map(it => it.results || [])))
                         }else {
                             res.status(404).json({message: `Result for ${name} not found`})
                         }
